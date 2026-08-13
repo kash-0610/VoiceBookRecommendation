@@ -22,8 +22,11 @@ def listen():
 
         result_label.config(text="You said:\n" + text)
 
+        return text
+
     except sr.WaitTimeoutError:
         result_label.config(text="I didn't hear you. Please try again.")
+        return None 
 
     except sr.UnknownValueError:
         result_label.config(
