@@ -38,3 +38,13 @@ for book_type, book_list in books.items():
     for book_name, author in book_list:
         print("Book Name:", book_name)
         print("Author   :", author)
+if __name__ == "__main__":
+    text = input("Enter your book request: ")
+
+    print("Genre:", detect_genre(text))
+    print("Author:", detect_author(text))
+
+    print("\nRecommended Books:")
+    for book, author in recommend(text):
+        print("Book Name:", book)
+        print("Author   :", author)
