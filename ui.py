@@ -10,60 +10,59 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QTextEdit
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont
 
-
-# -----------------------------
-# Temporary Expert System
-# -----------------------------
-def expert_system():
-    # Temporary voice-to-text result
-    user_query = "I am looking for a thrilling science fiction book with space exploration."
-
-    # Temporary recommendation
-    book = {
-        "title": "Project Hail Mary",
-        "author": "Andy Weir",
-        "genre": "Sci-Fi / Space Exploration",
-        "reason": "It matches your interest in science fiction, space exploration, survival, and problem-solving."
-    }
-
-    return user_query, book
+# Import modules created by other team members
+from voice_input import VoiceRecognizer
+from expert_system import get_recommendation
 
 
-# -----------------------------
-# Main Window
-# -----------------------------
+class SpeechWorker(QThread):
+    status_signal = pyqtSignal(str)
+    result_signal = pyqtSignal(str, bool)
+
+    def run(self):
+        try:
+            voice_recognizer = VoiceRecognizer()
+
+            success, result = voice_recognizer.listen(
+                status_callback=lambda message: self.status_signal.emit(message)
+            )
+
+            self.result_signal.emit(result, success)
+
+        except Exception as e:
+            self.result_signal.emit(
+                f"Voice recognition error: {str(e)}",
+                False
+            )
+
+
 class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
 
         self.setWindowTitle("Book Recommendation Expert System")
-        self.setFixedSize(700, 550)
+        self.setFixedSize(700, 580)
 
         # Text-to-speech engine
         self.tts = pyttsx3.init()
 
-        # Store current recommendation
         self.speech_text = ""
+        self.worker = None
 
         self.create_ui()
 
-
-    # -------------------------
-    # Create GUI
-    # -------------------------
     def create_ui(self):
-
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
         layout = QVBoxLayout()
         central_widget.setLayout(layout)
 
-        # Background
+        # Main window styling
         central_widget.setStyleSheet("""
             QWidget {
                 background-color: #0f172a;
@@ -72,22 +71,24 @@ class MainWindow(QMainWindow):
         """)
 
         # Title
-        title = QLabel("📚 Book Recommendation Expert System")
-        title.setFont(QFont("Arial", 20, QFont.Bold))
+        title = QLabel(
+            "📚 Voice Book Recommendation Expert System"
+        )
+        title.setFont(QFont("Arial", 18, QFont.Bold))
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("color: #38bdf8;")
-
         layout.addWidget(title)
 
         # Status
         self.status = QLabel("Status: Ready")
         self.status.setAlignment(Qt.AlignCenter)
         self.status.setStyleSheet("color: #a855f7;")
-
         layout.addWidget(self.status)
 
         # Speak button
-        self.speak_button = QPushButton("🎙️ Get Book Recommendation")
+        self.speak_button = QPushButton(
+            "🎙️ Speak Recommendation Request"
+        )
         self.speak_button.setFixedHeight(50)
 
         self.speak_button.setStyleSheet("""
@@ -102,37 +103,45 @@ class MainWindow(QMainWindow):
             QPushButton:hover {
                 background-color: #0369a1;
             }
+
+            QPushButton:disabled {
+                background-color: #334155;
+                color: #64748b;
+            }
         """)
 
-        self.speak_button.clicked.connect(self.get_recommendation)
-
+        self.speak_button.clicked.connect(self.start_listening)
         layout.addWidget(self.speak_button)
 
-        # User query
-        query_label = QLabel("Your Query:")
-        query_label.setFont(QFont("Arial", 12, QFont.Bold))
-
+        # Query label
+        query_label = QLabel(
+            "Your Query (Speech to Text):"
+        )
+        query_label.setFont(QFont("Arial", 11, QFont.Bold))
         layout.addWidget(query_label)
 
+        # Query text box
         self.query_box = QTextEdit()
         self.query_box.setReadOnly(True)
-        self.query_box.setFixedHeight(80)
-
+        self.query_box.setFixedHeight(70)
         layout.addWidget(self.query_box)
 
-        # Recommendation
-        result_label = QLabel("Expert System Recommendation:")
-        result_label.setFont(QFont("Arial", 12, QFont.Bold))
-
+        # Recommendation label
+        result_label = QLabel(
+            "Expert System Recommendation:"
+        )
+        result_label.setFont(QFont("Arial", 11, QFont.Bold))
         layout.addWidget(result_label)
 
+        # Recommendation text box
         self.result_box = QTextEdit()
         self.result_box.setReadOnly(True)
-
         layout.addWidget(self.result_box)
 
         # Replay button
-        self.replay_button = QPushButton("🔊 Speak Recommendation")
+        self.replay_button = QPushButton(
+            "🔊 Speak Recommendation"
+        )
         self.replay_button.setEnabled(False)
         self.replay_button.setFixedHeight(45)
 
@@ -144,73 +153,125 @@ class MainWindow(QMainWindow):
                 border-radius: 8px;
             }
 
+            QPushButton:hover {
+                background-color: #059669;
+            }
+
             QPushButton:disabled {
                 background-color: #334155;
                 color: #64748b;
             }
         """)
 
-        self.replay_button.clicked.connect(self.speak_recommendation)
+        self.replay_button.clicked.connect(
+            self.speak_recommendation
+        )
 
         layout.addWidget(self.replay_button)
 
+    def start_listening(self):
+        """Start voice recognition in a background thread."""
 
-    # -------------------------
-    # Get recommendation
-    # -------------------------
-    def get_recommendation(self):
+        self.speak_button.setEnabled(False)
+        self.replay_button.setEnabled(False)
 
-        self.status.setText("Status: Processing...")
+        self.status.setText(
+            "Status: Starting microphone..."
+        )
 
-        # Run expert system
-        query, book = expert_system()
+        self.worker = SpeechWorker()
 
-        # Show user's query
-        self.query_box.setText(query)
+        self.worker.status_signal.connect(
+            self.update_status
+        )
 
-        # Display recommendation
-        recommendation = (
+        self.worker.result_signal.connect(
+            self.process_recognized_speech
+        )
+
+        self.worker.start()
+
+    def update_status(self, message):
+        """Update the status label."""
+
+        self.status.setText(message)
+
+    def process_recognized_speech(self, text, success):
+        """Process the recognized speech and generate a recommendation."""
+
+        self.speak_button.setEnabled(True)
+
+        if not success:
+            self.status.setText(
+                f"Status: {text}"
+            )
+
+            self.query_box.setText(
+                "[No Speech / Error Detected]"
+            )
+
+            return
+
+        # Display recognized speech
+        self.query_box.setText(text)
+
+        # Get recommendation from expert system
+        book = get_recommendation(text)
+
+        # Format recommendation
+        recommendation_text = (
             f"📖 Title: {book['title']}\n"
             f"✍️ Author: {book['author']}\n"
-            f"🏷️ Genre: {book['genre']}\n\n"
-            f"💡 Why: {book['reason']}"
+            f"🏷️ Genre: {book['genre'].title()}\n\n"
+            f"💡 Reason: {book['reason']}"
         )
 
-        self.result_box.setText(recommendation)
+        self.result_box.setText(
+            recommendation_text
+        )
 
-        # Text for speech
+        # Prepare text-to-speech response
         self.speech_text = (
-            f"I recommend {book['title']} by {book['author']}. "
-            f"{book['reason']}"
+            f"I recommend {book['title']} by "
+            f"{book['author']}. {book['reason']}"
         )
 
-        # Enable replay
         self.replay_button.setEnabled(True)
 
-        # Speak automatically
+        self.status.setText(
+            "Status: Ready"
+        )
+
+        # Automatically speak the recommendation
         self.speak_recommendation()
 
-
-    # -------------------------
-    # Text to Speech
-    # -------------------------
     def speak_recommendation(self):
+        """Read the recommendation aloud."""
 
-        if self.speech_text:
+        if not self.speech_text:
+            return
 
-            self.status.setText("Status: Speaking...")
+        self.status.setText(
+            "Status: Speaking recommendation..."
+        )
 
+        QApplication.processEvents()
+
+        try:
             self.tts.say(self.speech_text)
             self.tts.runAndWait()
 
-            self.status.setText("Status: Ready")
+            self.status.setText(
+                "Status: Ready"
+            )
+
+        except Exception as e:
+            self.status.setText(
+                f"Status: Text-to-speech error: {str(e)}"
+            )
 
 
-# -----------------------------
-# Start Application
-# -----------------------------
 if __name__ == "__main__":
-
     app = QApplication(sys.argv)
 
     window = MainWindow()
